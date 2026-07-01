@@ -14,7 +14,10 @@ export const authMiddleware = async (
   const authHeader = req.headers.authorization as string | undefined;
 
   if (apiKey) {
-    const tenant = await prisma.tenant.findUnique({ where: { apiKey } });
+    const tenant = await prisma.tenant.findUnique({
+      where: { apiKey },
+      include: { wallet: true },
+    });
 
     if (!tenant) {
       res.status(401).json({ error: 'API key invalide' });
@@ -28,8 +31,9 @@ export const authMiddleware = async (
       prenom: tenant.prenom,
       email: tenant.email,
       telephone: tenant.telephone,
-      solde: tenant.solde,
     };
+
+    req.wallet = tenant.wallet ? { id: tenant.wallet.id, solde: tenant.wallet.solde } : undefined;
 
     next();
     return;
@@ -50,6 +54,7 @@ export const authMiddleware = async (
 
       const tenant = await prisma.tenant.findUnique({
         where: { id: decoded.sub },
+        include: { wallet: true },
       });
 
       if (!tenant) {
@@ -64,8 +69,9 @@ export const authMiddleware = async (
         prenom: tenant.prenom,
         email: tenant.email,
         telephone: tenant.telephone,
-        solde: tenant.solde,
       };
+
+      req.wallet = tenant.wallet ? { id: tenant.wallet.id, solde: tenant.wallet.solde } : undefined;
 
       next();
       return;

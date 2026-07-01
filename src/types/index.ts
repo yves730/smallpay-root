@@ -14,7 +14,6 @@ export interface TenantResponse {
   prenom: string;
   telephone: string;
   email: string;
-  solde: number;
   createdAt: Date;
 }
 
@@ -31,6 +30,9 @@ export interface AuthenticatedRequest extends Request {
     prenom: string;
     email: string;
     telephone: string;
+  };
+  wallet?: {
+    id: string;
     solde: number;
   };
 }

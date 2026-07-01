@@ -137,15 +137,13 @@ export async function initAcashout(): Promise<{ payToken: string }> {
   return response.data.data;
 }
 
-export async function pushPayment(payToken: string, params: OrangeCMPayRequest): Promise<OrangeCMPaymentResponse> {
+export async function pushPayment(payToken: string, params?: OrangeCMPayRequest): Promise<OrangeCMPaymentResponse> {
   const token = await getAccessToken();
-  const response = await axios.post(
+  const response = await axios.get(
     `${ORANGE_CM_API_BASE_URL}/omcoreapis/1.0.2/mp/push/${payToken}`,
-    params,
     {
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
         Accept: 'application/json',
       },
     }

@@ -28,7 +28,9 @@ export async function createTenant(data: TenantCreateInput): Promise<TenantRespo
       prenom: data.prenom,
       telephone: data.telephone,
       email: data.email,
-      solde: 0,
+      wallet: {
+        create: { solde: 0 },
+      },
     },
     select: {
       id: true,
@@ -37,7 +39,6 @@ export async function createTenant(data: TenantCreateInput): Promise<TenantRespo
       prenom: true,
       telephone: true,
       email: true,
-      solde: true,
       createdAt: true,
     },
   });
@@ -55,7 +56,6 @@ export async function getTenantByApiKey(apiKey: string) {
       prenom: true,
       telephone: true,
       email: true,
-      solde: true,
       createdAt: true,
     },
   });
@@ -70,7 +70,6 @@ export async function getTenantById(id: string) {
       prenom: true,
       telephone: true,
       email: true,
-      solde: true,
       createdAt: true,
     },
   });

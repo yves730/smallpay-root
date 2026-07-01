@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AuthenticatedRequest } from '../types';
 import * as tenantService from '../services/tenant';
 
 export async function createTenant(req: Request, res: Response): Promise<void> {
@@ -21,14 +22,15 @@ export async function createTenant(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function getProfile(req: Request, res: Response): Promise<void> {
-  const tenant = (req as any).tenant;
+export async function getProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const tenant = req.tenant!;
+  const wallet = req.wallet!;
   res.json({
     id: tenant.id,
     nom: tenant.nom,
     prenom: tenant.prenom,
     telephone: tenant.telephone,
     email: tenant.email,
-    solde: tenant.solde,
+    solde: wallet.solde,
   });
 }
