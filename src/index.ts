@@ -4,6 +4,8 @@ import cors from 'cors';
 import tenantRoutes from './routes/tenant';
 import transactionRoutes from './routes/transaction';
 import authRoutes from './routes/auth';
+import cashinRoutes from './routes/cashin';
+import cashoutRoutes from './routes/cashout';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +20,8 @@ app.get('/health', (_req, res) => {
 app.use('/api', authRoutes);
 app.use('/api', tenantRoutes);
 app.use('/api', transactionRoutes);
+app.use('/api/cashin', cashinRoutes);
+app.use('/api/cashout', cashoutRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route non trouvée' });

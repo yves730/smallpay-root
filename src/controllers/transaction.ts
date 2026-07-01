@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import prisma from '../config/database';
 import * as orangeService from '../services/orange';
+import * as orangeCMService from '../services/orangeCM';
 import { AuthenticatedRequest, TransactionRequest } from '../types';
 
 export async function cashin(req: AuthenticatedRequest, res: Response): Promise<void> {
@@ -147,6 +148,147 @@ export async function getTransactions(req: AuthenticatedRequest, res: Response):
     res.json({ transactions });
   } catch (error: any) {
     res.status(500).json({ error: 'Erreur lors de la récupération des transactions' });
+  }
+}
+
+export async function omInit(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { montant, telephone, return_url, cancel_url, description } = req.body;
+
+    if (!montant || montant <= 0) {
+      res.status(400).json({ error: 'Le montant doit être un nombre positif' });
+      return;
+    }
+
+    if (!telephone) {
+      res.status(400).json({ error: 'Le numéro de téléphone est requis' });
+      return;
+    }
+
+    if (!return_url) {
+      res.status(400).json({ error: 'return_url est requis' });
+      return;
+    }
+
+    const result = await orangeCMService.initPayment({
+      amount: String(montant),
+      phone_number: telephone,
+      return_url,
+      cancel_url: cancel_url || return_url,
+      description,
+    });
+
+    res.json({
+      success: true,
+      message: 'Paiement initié via Orange Money Cameroon',
+      data: result.data,
+    });
+  } catch (error: any) {
+    res.status(502).json({
+      error: "Erreur lors de l'appel à l'API Orange Cameroon",
+      details: error.response?.data || error.message,
+    });
+  }
+}
+
+export async function omPay(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const {
+      notifUrl,
+      channelUserMsisdn,
+      amount,
+      subscriberMsisdn,
+      pin,
+      orderId,
+      description,
+      payToken,
+    } = req.body;
+
+    const tenantId = req.tenant!.id;
+
+    if (!amount || amount <= 0) {
+      res.status(400).json({ error: 'Le montant doit être un nombre positif' });
+      return;
+    }
+
+    if (!payToken) {
+      res.status(400).json({ error: 'payToken est requis' });
+      return;
+    }
+
+    const commission = amount * 0.01;
+    const totalDebit = amount + commission;
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+
+    if (!tenant || tenant.solde < totalDebit) {
+      res.status(400).json({
+        error: 'Solde insuffisant',
+        necessaire: totalDebit,
+        disponible: tenant?.solde || 0,
+      });
+      return;
+    }
+
+    const transaction = await prisma.transaction.create({
+      data: {
+        tenantId,
+        type: 'CASHOUT',
+        montant: amount,
+        telephone: subscriberMsisdn,
+        statut: 'PENDING',
+      },
+    });
+
+    try {
+      const result = await orangeCMService.makePayment({
+        notifUrl,
+        channelUserMsisdn,
+        amount,
+        subscriberMsisdn,
+        pin,
+        orderId,
+        description: description || 'Retrait SmallPay',
+        payToken,
+      });
+
+      await prisma.$transaction([
+        prisma.tenant.update({
+          where: { id: tenantId },
+          data: { solde: { decrement: totalDebit } },
+        }),
+        prisma.transaction.update({
+          where: { id: transaction.id },
+          data: {
+            statut: 'SUCCESS',
+            referenceExterne: result.data?.payToken || payToken,
+            referenceOrange: result.data?.txnid || orderId,
+          },
+        }),
+      ]);
+
+      res.json({
+        success: true,
+        message: 'Paiement effectué avec succès',
+        montant_envoye: amount,
+        commission,
+        total_debite: totalDebit,
+        txnid: result.data?.txnid,
+        reference: transaction.id,
+      });
+    } catch (orangeError: any) {
+      await prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { statut: 'FAILED' },
+      });
+
+      res.status(502).json({
+        error: "Erreur lors de l'appel à l'API Orange Cameroon",
+        details: orangeError.response?.data || orangeError.message,
+      });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erreur lors du paiement Orange Cameroon' });
   }
 }
 
