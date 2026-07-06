@@ -2,6 +2,8 @@ import axios from 'axios';
 import {
   OrangeCMTokenResponse,
   OrangeCMInitTokenResponse,
+  OrangeCMCashinPayRequest,
+  OrangeCMCashinPaymentResponse,
   OrangeCMPayRequest,
   OrangeCMPaymentResponse,
 } from '../types';
@@ -144,6 +146,63 @@ export async function initCashout(): Promise<{ payToken: string }> {
 
   checkFault(response.data);
   return response.data.data;
+}
+
+export async function initCashin(): Promise<{ payToken: string }> {
+  const token = await getAccessToken();
+
+  const response = await axios.post<OrangeCMInitTokenResponse>(
+    `${ORANGE_CM_API_ORIGIN}/omcoreapis/1.0.2/cashin/init`,
+    null,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-AUTH-TOKEN': ORANGE_CM_X_AUTH_TOKEN,
+        Accept: 'application/json',
+      },
+    }
+  );
+
+  checkFault(response.data);
+  return response.data.data;
+}
+
+export async function cashinPay(params: OrangeCMCashinPayRequest): Promise<OrangeCMCashinPaymentResponse> {
+  const token = await getAccessToken();
+
+  const response = await axios.post<OrangeCMCashinPaymentResponse>(
+    `${ORANGE_CM_API_ORIGIN}/omcoreapis/1.0.2/cashin/pay`,
+    params,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-AUTH-TOKEN': ORANGE_CM_X_AUTH_TOKEN,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+    }
+  );
+
+  checkFault(response.data);
+  return response.data;
+}
+
+export async function getCashinPaymentStatus(payToken: string): Promise<OrangeCMCashinPaymentResponse> {
+  const token = await getAccessToken();
+
+  const response = await axios.get<OrangeCMCashinPaymentResponse>(
+    `${ORANGE_CM_API_ORIGIN}/omcoreapis/1.0.2/cashin/paymentstatus/${payToken}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-AUTH-TOKEN': ORANGE_CM_X_AUTH_TOKEN,
+        Accept: 'application/json',
+      },
+    }
+  );
+
+  checkFault(response.data);
+  return response.data;
 }
 
 export async function cashoutPay(params: OrangeCMPayRequest): Promise<OrangeCMPaymentResponse> {

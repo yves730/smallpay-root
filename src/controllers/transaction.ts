@@ -4,285 +4,211 @@ import * as orangeService from '../services/orange';
 import * as orangeCMService from '../services/orangeCM';
 import { AuthenticatedRequest, TransactionRequest } from '../types';
 
-export async function cashin(req: AuthenticatedRequest, res: Response): Promise<void> {
-  try {
-    const { montant, telephone } = req.body as TransactionRequest;
-    const tenantId = req.tenant!.id;
+function buildTransactionFilters(query: any, tenantId?: string): any {
+  const { categorie, reseau, dateDebut, dateFin } = query;
+  const statut = query.statut || query.status;
+  const where: any = {};
 
-    if (!montant || montant <= 0) {
-      res.status(400).json({ error: 'Le montant doit etre un nombre positif' });
-      return;
-    }
-
-    if (!telephone) {
-      res.status(400).json({ error: 'Le numero de telephone est requis' });
-      return;
-    }
-
-    const log = await prisma.transaction.create({
-      data: {
-        tenantId,
-        categorie: 'CASHIN',
-        reseau: 'OM',
-        type: 'CASHIN',
-        montant,
-        telephone,
-        statut: 'PENDING',
-      },
-    });
-
-    try {
-      const result = await orangeService.cashin(montant, telephone);
-
-      await prisma.transaction.update({
-        where: { id: log.id },
-        data: {
-          statut: 'SUCCESS',
-          payToken: result.pay_token,
-          responseData: JSON.stringify(result),
-        },
-      });
-
-      res.json({
-        success: true,
-        message: 'paiement initie',
-        payment_url: result.payment_url,
-        pay_token: result.pay_token,
-        reference: log.id,
-      });
-    } catch (orangeError: any) {
-      await prisma.transaction.update({
-        where: { id: log.id },
-        data: { statut: 'FAILED', responseData: JSON.stringify(orangeError.message) },
-      });
-
-      res.status(502).json({
-        error: "Erreur lors de l'appel a l'API Orange",
-        details: orangeError.message,
-      });
-    }
-  } catch (error: any) {
-    res.status(500).json({ error: 'Erreur lors du cashin' });
+  if (tenantId) {
+    where.tenantId = tenantId;
   }
+
+  if (categorie) {
+    where.categorie = String(categorie).toUpperCase();
+  }
+
+  if (statut) {
+    where.statut = String(statut).toUpperCase();
+  }
+
+  if (reseau) {
+    where.reseau = String(reseau).toUpperCase();
+  }
+
+  if (dateDebut || dateFin) {
+    where.createdAt = {};
+
+    if (dateDebut) {
+      where.createdAt.gte = new Date(String(dateDebut));
+    }
+
+    if (dateFin) {
+      where.createdAt.lte = new Date(String(dateFin));
+    }
+  }
+
+  return where;
 }
 
-export async function cashout(req: AuthenticatedRequest, res: Response): Promise<void> {
-  try {
-    const { montant, telephone } = req.body as TransactionRequest;
-    const tenantId = req.tenant!.id;
+function getPagination(query: any): { skip: number; take: number; page: number; limit: number } {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
 
-    if (!montant || montant <= 0) {
-      res.status(400).json({ error: 'Le montant doit etre un nombre positif' });
-      return;
-    }
-
-    if (!telephone) {
-      res.status(400).json({ error: 'Le numero de telephone est requis' });
-      return;
-    }
-
-    const wallet = await prisma.wallet.findUnique({ where: { tenantId } });
-
-    if (!wallet || wallet.solde < montant) {
-      res.status(400).json({ error: 'Solde insuffisant' });
-      return;
-    }
-
-    const log = await prisma.transaction.create({
-      data: {
-        tenantId,
-        categorie: 'CASHOUT',
-        reseau: 'OM',
-        type: 'CASHOUT',
-        montant,
-        telephone,
-        statut: 'PENDING',
-      },
-    });
-
-    try {
-      const result = await orangeService.cashout(montant, telephone);
-
-      await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: wallet.id },
-          data: { solde: { decrement: montant } },
-        }),
-        prisma.transaction.update({
-          where: { id: log.id },
-          data: {
-            statut: 'SUCCESS',
-            payToken: result.payToken,
-            responseData: JSON.stringify(result),
-          },
-        }),
-      ]);
-
-      res.json({
-        success: true,
-        message: 'Retrait effectue avec succes',
-        reference: log.id,
-      });
-    } catch (orangeError: any) {
-      await prisma.transaction.update({
-        where: { id: log.id },
-        data: { statut: 'FAILED', responseData: JSON.stringify(orangeError.message) },
-      });
-
-      res.status(502).json({
-        error: "Erreur lors de l'appel a l'API Orange",
-        details: orangeError.message,
-      });
-    }
-  } catch (error: any) {
-    res.status(500).json({ error: 'Erreur lors du cashout' });
-  }
+  return { page, limit, skip: (page - 1) * limit, take: limit };
 }
+
 
 export async function getTransactions(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
-    const tenantId = req.tenant!.id;
+    const where = buildTransactionFilters(req.query);
+    const { skip, take, page, limit } = getPagination(req.query);
 
-    const transactions = await prisma.transaction.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+    const [transactions, total] = await prisma.$transaction([
+      prisma.transaction.findMany({
+        where,
+        include: {
+          tenant: {
+            select: { id: true, nom: true, prenom: true, telephone: true, email: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
+      prisma.transaction.count({ where }),
+    ]);
 
-    res.json({ transactions });
+    res.json({ transactions, pagination: { total, page, limit } });
   } catch (error: any) {
     res.status(500).json({ error: 'Erreur lors de la recuperation des transactions' });
   }
 }
 
-export async function omInit(req: AuthenticatedRequest, res: Response): Promise<void> {
+export async function getTenantTransactions(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
-    const result = await orangeCMService.initPayment();
+    const { tenantId } = req.params;
 
-    res.json({
-      success: true,
-      message: result.message,
-      data: result.data,
-    });
-  } catch (error: any) {
-    res.status(502).json({
-      error: "Erreur lors de l'appel a l'API Orange Cameroon",
-      details: error.response?.data || error.message,
-    });
-  }
-}
-
-export async function omPay(req: AuthenticatedRequest, res: Response): Promise<void> {
-  try {
-    const {
-      notifUrl,
-      channelUserMsisdn,
-      amount,
-      subscriberMsisdn,
-      pin,
-      orderId,
-      description,
-      payToken,
-    } = req.body;
-
-    const tenantId = req.tenant!.id;
-
-    if (!amount || amount <= 0) {
-      res.status(400).json({ error: 'Le montant doit etre un nombre positif' });
+    if (!tenantId) {
+      res.status(400).json({ error: 'tenantId requis' });
       return;
     }
 
-    if (!payToken) {
-      res.status(400).json({ error: 'payToken est requis' });
-      return;
-    }
+    const where = buildTransactionFilters(req.query, tenantId);
+    const { skip, take, page, limit } = getPagination(req.query);
 
-    const commission = amount * 0.01;
-    const totalDebit = amount + commission;
-
-    const wallet = await prisma.wallet.findUnique({ where: { tenantId } });
-
-    if (!wallet || wallet.solde < totalDebit) {
-      res.status(400).json({
-        error: 'Solde insuffisant',
-        necessaire: totalDebit,
-        disponible: wallet?.solde || 0,
-      });
-      return;
-    }
-
-    const log = await prisma.transaction.create({
-      data: {
-        tenantId,
-        categorie: 'CASHOUT',
-        reseau: 'OM',
-        type: 'PAY',
-        montant: amount,
-        telephone: subscriberMsisdn,
-        statut: 'PENDING',
-        payToken,
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        telephone: true,
+        email: true,
+        wallet: true,
       },
     });
 
-    try {
-      await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: wallet.id },
-          data: { solde: { decrement: totalDebit } },
-        }),
-        prisma.transaction.update({
-          where: { id: log.id },
-          data: { responseData: JSON.stringify({ walletDebited: true, totalDebit }) },
-        }),
-      ]);
-
-      const result = await orangeCMService.makePayment({
-        notifUrl,
-        channelUserMsisdn,
-        amount,
-        subscriberMsisdn,
-        pin,
-        orderId,
-        description: description || 'Retrait SmallPay',
-        payToken,
-      });
-
-      await prisma.transaction.update({
-        where: { id: log.id },
-        data: {
-          statut: 'SUCCESS',
-          txnid: result.data?.txnid,
-          responseData: JSON.stringify({ ...result.data, walletDebited: true, totalDebit }),
-        },
-      });
-
-      res.json({
-        success: true,
-        message: 'Paiement effectue avec succes',
-        montant_envoye: amount,
-        commission,
-        total_debite: totalDebit,
-        txnid: result.data?.txnid,
-        reference: log.id,
-      });
-    } catch (orangeError: any) {
-      await prisma.transaction.update({
-        where: { id: log.id },
-        data: {
-          statut: 'FAILED',
-          responseData: JSON.stringify({ error: orangeError.response?.data || orangeError.message, walletDebited: true, totalDebit }),
-        },
-      });
-
-      res.status(502).json({
-        error: "Erreur lors de l'appel a l'API Orange Cameroon",
-        details: orangeError.response?.data || orangeError.message,
-      });
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant introuvable' });
+      return;
     }
+
+    const [transactions, total] = await prisma.$transaction([
+      prisma.transaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
+      prisma.transaction.count({ where }),
+    ]);
+
+    res.json({ tenant, transactions, pagination: { total, page, limit } });
   } catch (error: any) {
-    res.status(500).json({ error: 'Erreur lors du paiement Orange Cameroon' });
+    res.status(500).json({ error: 'Erreur lors de la recuperation des transactions du tenant' });
   }
 }
+
+export async function getWallets(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const wallets = await prisma.wallet.findMany({
+      include: {
+        tenant: {
+          select: { id: true, nom: true, prenom: true, telephone: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({ wallets });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erreur lors de la recuperation des wallets' });
+  }
+}
+
+export async function getWalletByTenant(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { tenantId } = req.params;
+
+    if (!tenantId) {
+      res.status(400).json({ error: 'tenantId requis' });
+      return;
+    }
+
+    const wallet = await prisma.wallet.findUnique({
+      where: { tenantId },
+      include: {
+        tenant: {
+          select: { id: true, nom: true, prenom: true, telephone: true, email: true },
+        },
+      },
+    });
+
+    if (!wallet) {
+      res.status(404).json({ error: 'Wallet introuvable pour ce tenant' });
+      return;
+    }
+
+    res.json({ wallet });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erreur lors de la recuperation du wallet' });
+  }
+}
+
+export async function getTransactionStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const where = buildTransactionFilters(req.query);
+    const [grouped, totalAmount] = await prisma.$transaction([
+      prisma.transaction.groupBy({
+        by: ['statut'],
+        where,
+        _count: { _all: true },
+        _sum: { montant: true },
+      }),
+      prisma.transaction.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { montant: true },
+      }),
+    ]);
+
+    const statsByStatus = grouped.reduce((acc: any, item) => {
+      acc[item.statut] = {
+        count: item._count._all,
+        montant: item._sum.montant || 0,
+      };
+      return acc;
+    }, {});
+
+    res.json({
+      filters: {
+        categorie: req.query.categorie || null,
+        status: req.query.status || req.query.statut || null,
+        reseau: req.query.reseau || null,
+        dateDebut: req.query.dateDebut || null,
+        dateFin: req.query.dateFin || null,
+      },
+      total: {
+        count: totalAmount._count._all,
+        montant: totalAmount._sum.montant || 0,
+      },
+      statuts: statsByStatus,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Erreur lors du calcul des statistiques' });
+  }
+}
+
 
 export async function handleCallback(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {

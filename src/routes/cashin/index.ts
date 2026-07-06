@@ -4,11 +4,8 @@ import { authMiddleware } from '../../middleware/auth';
 
 const router = Router();
 
-router.post('/callback', cashinController.callback);
+router.post('/', authMiddleware, cashinController.create);
 router.post('/pay', authMiddleware, cashinController.pay);
-router.get('/push/:reference', authMiddleware, cashinController.push);
-router.get('/push', authMiddleware, cashinController.push);
-router.get('/paymentstatus/:reference', authMiddleware, cashinController.getStatus);
-router.get('/paymentstatus', authMiddleware, cashinController.getStatus);
+router.get('/paymentstatus/:id_transaction', authMiddleware, cashinController.getStatus);
 
 export default router;

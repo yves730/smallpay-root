@@ -118,6 +118,17 @@ export interface OrangeCMPayRequest {
   payToken: string;
 }
 
+export interface OrangeCMCashinPayRequest {
+  channelUserMsisdn: string;
+  notifUrl: string;
+  amount: number;
+  subscriberMsisdn: string;
+  pin: string;
+  orderId: string;
+  description: string;
+  payToken: string;
+}
+
 export interface OrangeCMPayResponse {
   status: number;
   message: string;
@@ -155,8 +166,26 @@ export interface OrangeCMPaymentData {
   status: string;
 }
 
+export interface OrangeCMCashinPaymentData {
+  createtime: number | string;
+  amount: number;
+  channelUserMsisdn: string;
+  subscriberMsisdn: string;
+  txnmode: string;
+  txnstatus: number;
+  txnmessage: string;
+  payToken: string;
+  txnid: string;
+  status: string;
+}
+
 export interface OrangeCMPaymentResponse {
   data: OrangeCMPaymentData;
+  message: string;
+}
+
+export interface OrangeCMCashinPaymentResponse {
+  data: OrangeCMCashinPaymentData;
   message: string;
 }
 
