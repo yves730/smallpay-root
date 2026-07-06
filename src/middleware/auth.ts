@@ -2,8 +2,7 @@ import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/database';
 import { AuthenticatedRequest } from '../types';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
+import { JWT_SECRET } from '../config/jwt';
 
 export const authMiddleware = async (
   req: AuthenticatedRequest,

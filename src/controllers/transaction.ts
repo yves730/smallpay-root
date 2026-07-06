@@ -157,34 +157,11 @@ export async function getTransactions(req: AuthenticatedRequest, res: Response):
 
 export async function omInit(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
-    const { montant, telephone, return_url, cancel_url, description } = req.body;
-
-    if (!montant || montant <= 0) {
-      res.status(400).json({ error: 'Le montant doit etre un nombre positif' });
-      return;
-    }
-
-    if (!telephone) {
-      res.status(400).json({ error: 'Le numero de telephone est requis' });
-      return;
-    }
-
-    if (!return_url) {
-      res.status(400).json({ error: 'return_url est requis' });
-      return;
-    }
-
-    const result = await orangeCMService.initPayment({
-      amount: String(montant),
-      phone_number: telephone,
-      return_url,
-      cancel_url: cancel_url || return_url,
-      description,
-    });
+    const result = await orangeCMService.initPayment();
 
     res.json({
       success: true,
-      message: 'Paiement initie via Orange Money Cameroon',
+      message: result.message,
       data: result.data,
     });
   } catch (error: any) {
@@ -248,6 +225,17 @@ export async function omPay(req: AuthenticatedRequest, res: Response): Promise<v
     });
 
     try {
+      await prisma.$transaction([
+        prisma.wallet.update({
+          where: { id: wallet.id },
+          data: { solde: { decrement: totalDebit } },
+        }),
+        prisma.transaction.update({
+          where: { id: log.id },
+          data: { responseData: JSON.stringify({ walletDebited: true, totalDebit }) },
+        }),
+      ]);
+
       const result = await orangeCMService.makePayment({
         notifUrl,
         channelUserMsisdn,
@@ -259,20 +247,14 @@ export async function omPay(req: AuthenticatedRequest, res: Response): Promise<v
         payToken,
       });
 
-      await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: wallet.id },
-          data: { solde: { decrement: totalDebit } },
-        }),
-        prisma.transaction.update({
-          where: { id: log.id },
-          data: {
-            statut: 'SUCCESS',
-            txnid: result.data?.txnid,
-            responseData: JSON.stringify(result.data),
-          },
-        }),
-      ]);
+      await prisma.transaction.update({
+        where: { id: log.id },
+        data: {
+          statut: 'SUCCESS',
+          txnid: result.data?.txnid,
+          responseData: JSON.stringify({ ...result.data, walletDebited: true, totalDebit }),
+        },
+      });
 
       res.json({
         success: true,
@@ -286,7 +268,10 @@ export async function omPay(req: AuthenticatedRequest, res: Response): Promise<v
     } catch (orangeError: any) {
       await prisma.transaction.update({
         where: { id: log.id },
-        data: { statut: 'FAILED', responseData: JSON.stringify(orangeError.response?.data || orangeError.message) },
+        data: {
+          statut: 'FAILED',
+          responseData: JSON.stringify({ error: orangeError.response?.data || orangeError.message, walletDebited: true, totalDebit }),
+        },
       });
 
       res.status(502).json({

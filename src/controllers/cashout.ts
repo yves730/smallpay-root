@@ -58,6 +58,8 @@ export async function create(req: AuthenticatedRequest, res: Response): Promise<
       },
     });
 
+    let payLogId: string | undefined;
+
     try {
       const { payToken } = await orangeCMService.initCashout();
 
@@ -83,6 +85,18 @@ export async function create(req: AuthenticatedRequest, res: Response): Promise<
           reference,
         },
       });
+      payLogId = payLog.id;
+
+      await prisma.$transaction([
+        prisma.wallet.update({
+          where: { id: wallet.id },
+          data: { solde: { decrement: totalDebit } },
+        }),
+        prisma.transaction.update({
+          where: { id: payLog.id },
+          data: { responseData: JSON.stringify({ walletDebited: true, totalDebit }) },
+        }),
+      ]);
 
       const result = await orangeCMService.cashoutPay({
         notifUrl,
@@ -95,20 +109,14 @@ export async function create(req: AuthenticatedRequest, res: Response): Promise<
         payToken,
       });
 
-      await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: wallet.id },
-          data: { solde: { decrement: totalDebit } },
-        }),
-        prisma.transaction.update({
-          where: { id: payLog.id },
-          data: {
-            statut: 'SUCCESS',
-            txnid: result.data?.txnid,
-            responseData: JSON.stringify(result.data),
-          },
-        }),
-      ]);
+      await prisma.transaction.update({
+        where: { id: payLog.id },
+        data: {
+          statut: 'SUCCESS',
+          txnid: result.data?.txnid,
+          responseData: JSON.stringify({ ...result.data, walletDebited: true, totalDebit }),
+        },
+      });
 
       res.json({
         success: true,
@@ -126,8 +134,14 @@ export async function create(req: AuthenticatedRequest, res: Response): Promise<
       });
     } catch (orangeError: any) {
       await prisma.transaction.update({
-        where: { id: initLog.id },
-        data: { statut: 'FAILED', responseData: JSON.stringify(orangeError.response?.data || orangeError.message) },
+        where: { id: payLogId || initLog.id },
+        data: {
+          statut: 'FAILED',
+          responseData: JSON.stringify({
+            error: orangeError.response?.data || orangeError.message,
+            ...(payLogId ? { walletDebited: true, totalDebit } : {}),
+          }),
+        },
       });
 
       res.status(502).json({
